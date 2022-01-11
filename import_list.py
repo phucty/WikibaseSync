@@ -8,6 +8,7 @@ from tqdm import tqdm
 import logging
 from datetime import datetime
 from utilities.util import WikibaseImporter
+import others_config as cf
 
 
 app_config = configparser.ConfigParser()
@@ -52,18 +53,8 @@ def import_wikidata_items(list_items, from_i=0, import_claims=True):
         )
 
 
-init_list = [
-    "P1630",  # formatter URL P3
-    "P1921",  # formatter URI for RDF resource P4
-    "P31",  # instance of P5
-    "P159",  # headquarters location P6
-    "P3225",  # Corporate Number (Japan) P7
-    "Q4830453",  # business Q1
-    "Q891723",  # public company Q2
-    "Q786820",  # automobile manufacturer Q3
-    "Q53268",  # Toyota Q4
-]
-import_wikidata_items(init_list, import_claims=False)
+init_list = cf.WC_INIT_ITEMS
+import_wikidata_items(init_list, import_claims=True)
 
 # full_list = list(load_list(dir_file="data/id.csv"))
 # import_wikidata_items(full_list, import_claims=True)

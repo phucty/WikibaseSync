@@ -109,6 +109,44 @@ class WikibaseImporter:
         }
         return diff
 
+    def edit_wikibase_item_info(
+        self, info, new_data=None, wikidata_item=None, wikibase_item=None, batch_size=20
+    ):
+        # iw.print_status(f"  - Item {info.value}: {len(new_data)} updates")
+        for batch in chunks(new_data, batch_size):
+            try:
+                wikibase_item.editEntity(
+                    {info.value: batch}, summary=f"The {info.value} in wikidata changed"
+                )
+            except pywikibot.exceptions.OtherPageSaveError as e:
+                if wikidata_item is None:
+                    raise KeyError
+                if wikidata_item.getID().startswith("Q"):
+                    x = re.search(r"\[\[Item:.*\]\]", str(e))
+                    x_str = "[[Item:"
+                elif wikidata_item.getID().startswith("P"):
+                    x = re.search(r"\[\[Property:.*\]\]", str(e))
+                    x_str = "[[Property:"
+                else:
+                    raise KeyError
+                if x:
+                    existed_item = x.group(0).replace(x_str, "").split("|")[0]
+                    if wikidata_item.getID().startswith("Q"):
+                        wikibase_item = pywikibot.ItemPage(
+                            self.wikibase_repo, existed_item
+                        )
+                    elif wikidata_item.getID().startswith("P"):
+                        wikibase_item = pywikibot.PropertyPage(
+                            self.wikibase_repo, existed_item
+                        )
+                    else:
+                        raise KeyError
+                    return self.change_wikibase_item_info(
+                        info, wikidata_item, wikibase_item, batch_size
+                    )
+                else:
+                    iw.print_status("This should not happen 3")
+
     def change_wikibase_item_info(
         self, info, wikidata_item, wikibase_item, batch_size=20
     ):
@@ -145,38 +183,9 @@ class WikibaseImporter:
 
         if not new_data:
             return wikibase_item.getID()
-        # iw.print_status(f"  - Item {info.value}: {len(new_data)} updates")
-        for batch in chunks(new_data, batch_size):
-            try:
-                wikibase_item.editEntity(
-                    {info.value: batch}, summary=f"The {info.value} in wikidata changed"
-                )
-            except pywikibot.exceptions.OtherPageSaveError as e:
-                if wikidata_item.getID().startswith("Q"):
-                    x = re.search(r"\[\[Item:.*\]\]", str(e))
-                    x_str = "[[Item:"
-                elif wikidata_item.getID().startswith("P"):
-                    x = re.search(r"\[\[Property:.*\]\]", str(e))
-                    x_str = "[[Property:"
-                else:
-                    raise KeyError
-                if x:
-                    existed_item = x.group(0).replace(x_str, "").split("|")[0]
-                    if wikidata_item.getID().startswith("Q"):
-                        wikibase_item = pywikibot.ItemPage(
-                            self.wikibase_repo, existed_item
-                        )
-                    elif wikidata_item.getID().startswith("P"):
-                        wikibase_item = pywikibot.PropertyPage(
-                            self.wikibase_repo, existed_item
-                        )
-                    else:
-                        raise KeyError
-                    return self.change_wikibase_item_info(
-                        info, wikidata_item, wikibase_item, batch_size
-                    )
-                else:
-                    iw.print_status("This should not happen 3")
+        self.edit_wikibase_item_info(
+            info, new_data, wikidata_item, wikibase_item, batch_size=batch_size
+        )
         return wikibase_item.getID()
 
     # comparing the sitelinks
@@ -1044,14 +1053,14 @@ class WikibaseImporter:
                                 ) = self.compare_claim(
                                     q_wikidata, q_wikibase, translate
                                 )
-                                if qualifier_claim_found_equal_value == True:
+                                if qualifier_claim_found_equal_value:
                                     qualifier_equal = True
-                    if qualifier_equal == False:
+                    if not qualifier_equal:
                         qualifiers_equal = False
         if (
             "qualifiers" in wikidata_claim
             and not ("qualifiers" in wikibase_claim)
-            or (not "qualifiers" in wikidata_claim)
+            or ("qualifiers" not in wikidata_claim)
             and "qualifiers" in wikibase_claim
         ):
             qualifiers_equal = False
@@ -1087,10 +1096,10 @@ class WikibaseImporter:
                                             q_wikidata, q_wikibase, translate
                                         )
                                         # iw.print_status("qualifier_claim_found_equal_value", references_claim_found_equal_value)
-                                        if references_claim_found_equal_value == True:
+                                        if references_claim_found_equal_value:
                                             # iw.print_status("Enter here ....")
                                             reference_equal = True
-                        if reference_equal == False:
+                        if not reference_equal:
                             references_equal = False
         # else:
         #     references_equal = False
@@ -1136,15 +1145,15 @@ class WikibaseImporter:
         # check which claims are in wikibase and in wikidata with the same property but different value, and delete them
         claimsToRemove = []
         claim_more_accurate = []
-        for wikibase_claims in wikibase_item.claims:
-            for wikibase_c in wikibase_item.claims.get(wikibase_claims):
-                # iw.print_status("Trying to find this claim ", wikibase_c)
+        for wb_claims in wikibase_item.claims:
+            for wb_claim in wikibase_item.claims.get(wb_claims):
                 alreadyFound = False
-                wikibase_claim = wikibase_c.toJSON()
-                wikibase_propertyId = wikibase_claim.get("mainsnak").get("property")
                 found = False
                 found_equal_value = False
-                found_more_accurate = False  # tells if the statement to import is better then the existing one, i.e. if it has references and qualifiers for the fact
+                found_more_accurate = False
+                wb_claim_json = wb_claim.toJSON()
+                wb_prop = wb_claim_json.get("mainsnak").get("property")
+                # tells if the statement to import is better then the existing one, i.e. if it has references and qualifiers for the fact
                 for claims in wikidata_item.claims:
                     for c in wikidata_item.claims.get(claims):
                         wikidata_claim = c.toJSON()
@@ -1152,47 +1161,42 @@ class WikibaseImporter:
                             "property"
                         )
                         # if the property is not there then they cannot be at the same time in wikibase and wikidata
-                        if self.id.contains_id(wikidata_propertyId):
-                            if (
-                                self.id.get_id(wikidata_propertyId)
-                                == wikibase_propertyId
-                            ):
+                        if (
+                            self.id.contains_id(wikidata_propertyId)
+                            and self.id.get_id(wikidata_propertyId) == wb_prop
+                        ):
+                            (
+                                found_here,
+                                found_equal_value_here,
+                                more_accurate_here,
+                            ) = self.compare_claim_with_qualifiers_and_references(
+                                wikidata_claim, wb_claim_json, True
+                            )
+                            # print(
+                            #     "Result ",
+                            #     found_here,
+                            #     found_equal_value_here,
+                            #     more_accurate_here,
+                            # )
+                            if found_here:
+                                found = True
+                            if found_equal_value and found_equal_value_here:
+                                alreadyFound = True
+                            if found_equal_value_here:
+                                found_equal_value = True
+                            found_more_accurate = more_accurate_here
 
-                                # if wikidata_propertyId == 'P2884':
-
-                                # if self.id.get_id(wikidata_propertyId) == 'P194' and wikidata_propertyId == "P530":
-                                # iw.print_status(wikidata_claim,"---",wikibase_claim)
-                                (
-                                    found_here,
-                                    found_equal_value_here,
-                                    more_accurate_here,
-                                ) = self.compare_claim_with_qualifiers_and_references(
-                                    wikidata_claim, wikibase_claim, True
-                                )
-                                # iw.print_status('Result ',found_here,found_equal_value_here, more_accurate_here)
-                                if found_here == True:
-                                    found = True
-                                if (
-                                    found_equal_value == True
-                                    and found_equal_value_here == True
-                                ):
-                                    alreadyFound = True
-                                if found_equal_value_here == True:
-                                    found_equal_value = True
-                                found_more_accurate = more_accurate_here
-
-                if found == True and found_equal_value == False:
-                    claimsToRemove.append(wikibase_c)
+                if found and not found_equal_value:
+                    claimsToRemove.append(wb_claim)
                     claim_more_accurate.append(found_more_accurate)
-                    # iw.print_status("This claim is deleted ", wikibase_claim)
-                if alreadyFound == True:
-                    claimsToRemove.append(wikibase_c)
+                    # print("This claim is deleted ", wb_claim_json)
+                if alreadyFound:
+                    claimsToRemove.append(wb_claim)
                     claim_more_accurate.append(found_more_accurate)
-                    # iw.print_status("This claim is deleted it's a duplicate", wikibase_claim)
+                    # print("This claim is deleted it's a duplicate", wb_claim_json)
 
-        # iw.print_status("CHECK WHO ADDED THE CLAIMS")
-        # check that the claims to delete where added by Wikidata Updater, if not, don't delete them
-        # get all the edit history
+        # print("CHECK WHO ADDED THE CLAIMS")
+        # check that the claims to delete where added by Wikidata Updater, if not, don't delete them get all the edit history
         not_remove = []
         revisions_tmp = wikibase_item.revisions(content=True)
         revisions = []
@@ -1206,15 +1210,14 @@ class WikibaseImporter:
             if revision["user"] != self.user:
                 is_only_wikidata_updater_user = False
                 break
-        # iw.print_status("is_only_wikidata_updater_user",is_only_wikidata_updater_user)
+        # iw.print_status("is_only_wikidata_updater_user", is_only_wikidata_updater_user)
         if not is_only_wikidata_updater_user:
             for i in range(0, len(claimsToRemove)):
                 claimToRemove = claimsToRemove[i]
                 # iw.print_status("CHECKING CLAIM ",claimToRemove, "---", claim_more_accurate[i],"---", revisions)
                 # go through the history and find the edit where it was added and the user that made that edit
-                if (
-                    claim_more_accurate[i] == False
-                ):  # if the claim is more accurate it is better to cancel the existing one
+                # if the claim is more accurate it is better to cancel the existing one
+                if not claim_more_accurate[i]:
                     edit_where_claim_was_added = len(revisions) - 1
                     for i in range(0, len(revisions)):
                         # iw.print_status("new revision ",revisions[i]['user'])
@@ -1223,11 +1226,11 @@ class WikibaseImporter:
                         )
                         found = False
                         for claims_revision in item_revision["claims"]:
-                            if found == False:
+                            if not found:
                                 for c_revision in item_revision["claims"].get(
                                     claims_revision
                                 ):
-                                    if found == False:
+                                    if not found:
                                         (
                                             found_here,
                                             found_equal_value_here,
@@ -1237,14 +1240,26 @@ class WikibaseImporter:
                                             c_revision.toJSON(),
                                             False,
                                         )
-                                        # iw.print_status(claimToRemove.toJSON(), "----", c_revision.toJSON())
-                                        # iw.print_status("found_equal_value_here",found_equal_value_here, " more_accurate", more_accurate)
-                                        if found_equal_value_here == True:
+                                        # iw.print_status(
+                                        #     claimToRemove.toJSON(),
+                                        #     "----",
+                                        #     c_revision.toJSON(),
+                                        # )
+                                        # iw.print_status(
+                                        #     "found_equal_value_here",
+                                        #     found_equal_value_here,
+                                        #     " more_accurate",
+                                        #     more_accurate,
+                                        # )
+                                        if found_equal_value_here:
                                             found = True
-                        if found == False:
+                        if not found:
                             edit_where_claim_was_added = i - 1
                             break
-                    # iw.print_status("User that added this claim ", revisions[edit_where_claim_was_added]['user'])
+                    # iw.print_status(
+                    #     "User that added this claim ",
+                    #     revisions[edit_where_claim_was_added]["user"],
+                    # )
                     if revisions[edit_where_claim_was_added]["user"] != self.user:
                         not_remove.append(claimToRemove)
         for c in not_remove:
@@ -1279,16 +1294,16 @@ class WikibaseImporter:
                 ) and not wikibase_item.getID().startswith("P"):
                     continue
 
-                for wikibase_claims in wikibase_item.claims:
-                    for wikibase_c in wikibase_item.claims.get(wikibase_claims):
-                        wikibase_claim = wikibase_c.toJSON()
+                for wb_claims in wikibase_item.claims:
+                    for wb_claim in wikibase_item.claims.get(wb_claims):
+                        wb_claim_json = wb_claim.toJSON()
                         if self.id.contains_id(wikidata_propertyId):
                             (
                                 claim_found,
                                 claim_found_equal_value,
                                 more_accurate,
                             ) = self.compare_claim_with_qualifiers_and_references(
-                                wikidata_claim, wikibase_claim, True
+                                wikidata_claim, wb_claim_json, True
                             )
                             if claim_found_equal_value:
                                 found_equal_value = True
@@ -1320,7 +1335,7 @@ class WikibaseImporter:
                                             new_reference = self.translateClaim(
                                                 old_reference
                                             )
-                                            # iw.print_status(new_reference)
+                                            iw.print_status(new_reference)
                                             # this can happen if the object entity has no label in any given language
                                             if new_reference != None:
                                                 new_references.append(new_reference)
@@ -1335,13 +1350,18 @@ class WikibaseImporter:
 
                         else:
                             debug = 1
-                            # iw.print_status('The translated claim is None ', wikidata_claim.get('mainsnak'))
+                            # iw.print_status(
+                            #     "The translated claim is None ",
+                            #     wikidata_claim.get("mainsnak"),
+                            # )
                     elif wikidata_claim.get("mainsnak").get("snaktype") == "novalue":
                         debug = 1
                         # iw.print_status("Claims with no value not implemented yet")
                     else:
                         debug = 1
-                        # iw.print_status('This should not happen ', wikidata_claim.get('mainsnak'))
+                        # iw.print_status(
+                        #     "This should not happen ", wikidata_claim.get("mainsnak")
+                        # )
         # iw.print_status("claimsToAdd ", newClaims)
         error_claims = 0
         if len(newClaims) > 0:
@@ -1367,9 +1387,9 @@ class WikibaseImporter:
                             pywikibot.exceptions.OtherPageSaveError,
                         ) as e:
                             error_claims += 1
-                            iw.print_status(claimToAdd)
-        if error_claims:
-            iw.print_status(f"Claim edit: {error_claims} errors")
+                            # iw.print_status(claimToAdd)
+        # if error_claims:
+        #     iw.print_status(f"Claim edit: {error_claims} errors")
 
     def wikidata_link(self, wikibase_item, wikidata_item):
         # make a link to wikidata if it does not exist

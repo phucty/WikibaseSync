@@ -2,8 +2,8 @@ from datetime import datetime
 from enum import Enum
 
 FORMAT_DATE = "%Y_%m_%d_%H_%M"
-DIR_ROOT = "/home/phuc/git/WikibaseSync"
-# DIR_ROOT = "/Users/phucnguyen/git/WikibaseSync"
+# DIR_ROOT = "/home/phuc/git/WikibaseSync"
+DIR_ROOT = "/Users/phucnguyen/git/WikibaseSync"
 DIR_LOG = f"{DIR_ROOT}/log/{datetime.now().strftime(FORMAT_DATE)}.txt"
 DIR_INIT_ITEMS = f"{DIR_ROOT}/data/init_items.csv"
 DIR_MAP_WD_COM_ID = f"{DIR_ROOT}/data/map_wd_com_id.csv"
@@ -80,6 +80,49 @@ SPARQL_JAPAN_COMPANIES_ITEMS = {
     "query": "SELECT DISTINCT ?i {?i wdt:P3225 ?id}",
     "params": ["i"],
 }
+
+SPARQL_COUNTRY_CITIES = {
+    "query": "SELECT DISTINCT ?i {{?i wdt:P31/wdt:P279* wd:Q50337} UNION {?i wdt:P31/wdt:P279* wd:Q494721}}",
+    "params": ["i"],
+}
+
+SPARQL_COUNTRY_JAPAN = {
+    "query": "SELECT DISTINCT ?i {{?i wdt:P131* wd:Q17} UNION {?i wdt:P31/wdt:P279* wd:Q50337} UNION {?i wdt:P31/wdt:P279* wd:Q494721}}",
+    "params": ["i"],
+}
+
+ATTRIBUTES_JA_COOP = [
+    "sequenceNumber",
+    "corporateNumber",  # P7
+    "process",
+    "correct",
+    "updateDate",
+    "changeDate",
+    "name",  # Convert to
+    "nameImageId",
+    "kind",
+    "prefectureName",
+    "cityName",
+    "streetNumber",
+    "addressImageId",
+    "prefectureCode",
+    "cityCode",
+    "postCode",
+    "addressOutside",
+    "addressOutsideImageId",
+    "closeDate",
+    "closeCause",
+    "successorCorporateNumber",
+    "changeCause",
+    "assignmentDate",
+    "latest",
+    "enName",
+    "enPrefectureName",
+    "enCityName",
+    "enAddressOutside",
+    "furigana",
+    "hihyoji",
+]
 
 # Wikibase language
 # https://gerrit.wikimedia.org/r/changes/operations%2Fmediawiki-config~539162/revisions/3/files/langlist/download
